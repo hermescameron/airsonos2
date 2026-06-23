@@ -1,0 +1,5 @@
+/.git
+/.direnv
+/target
+/result
+*.log

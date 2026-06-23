@@ -1,0 +1,23 @@
+[package]
+name = "airsonos2-stream"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+airsonos2-core.workspace = true
+axum.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+http.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+url.workspace = true

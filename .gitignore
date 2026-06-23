@@ -1,0 +1,9 @@
+/target/
+/.cargo-target/
+/.direnv/
+/.env
+/result
+/config.toml
+/root@*
+*.log
+*.lo

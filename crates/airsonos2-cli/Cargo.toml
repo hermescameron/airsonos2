@@ -1,0 +1,25 @@
+[package]
+name = "airsonos2-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "airsonos2"
+path = "src/main.rs"
+
+[dependencies]
+airsonos2-airplay.workspace = true
+airsonos2-core.workspace = true
+airsonos2-diagnostics.workspace = true
+airsonos2-sonos.workspace = true
+airsonos2-stream.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true

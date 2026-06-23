@@ -1,0 +1,15 @@
+[package]
+name = "airsonos2-diagnostics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+airsonos2-core.workspace = true
+airsonos2-sonos.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

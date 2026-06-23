@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - name: Format
+        run: nix develop -c cargo fmt --check
+      - name: Clippy
+        run: nix develop -c cargo clippy --workspace --all-features -- -D warnings
+      - name: Test
+        run: nix develop -c cargo test --workspace --all-features
+      - name: Docker build
+        run: docker build -f packaging/docker/Dockerfile .

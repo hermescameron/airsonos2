@@ -1,0 +1,20 @@
+[package]
+name = "airsonos2-sonos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+airsonos2-core.workspace = true
+quick-xml.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+axum.workspace = true

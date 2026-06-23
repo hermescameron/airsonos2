@@ -1,0 +1,51 @@
+[workspace]
+members = [
+  "crates/airsonos2-airplay",
+  "crates/airsonos2-cli",
+  "crates/airsonos2-core",
+  "crates/airsonos2-diagnostics",
+  "crates/airsonos2-sonos",
+  "crates/airsonos2-stream",
+]
+exclude = ["vendor/shairplay"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/judahfuller/airsonos2"
+
+[workspace.dependencies]
+airsonos2-airplay = { path = "crates/airsonos2-airplay" }
+airsonos2-core = { path = "crates/airsonos2-core" }
+airsonos2-diagnostics = { path = "crates/airsonos2-diagnostics" }
+airsonos2-sonos = { path = "crates/airsonos2-sonos" }
+airsonos2-stream = { path = "crates/airsonos2-stream" }
+anyhow = "1.0"
+axum = "0.8"
+bytes = "1.6"
+clap = { version = "4.5", features = ["derive", "env"] }
+futures-util = "0.3"
+http = "1.1"
+quick-xml = { version = "0.37", features = ["serialize"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+shairplay = { version = "=0.5.0", features = ["ap2", "resample"] }
+tempfile = "3.10"
+thiserror = "2.0"
+tokio = { version = "1.45", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["io"] }
+toml = "0.8"
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = { version = "2.5", features = ["serde"] }
+uuid = { version = "1.8", features = ["serde", "v4"] }
+
+[patch.crates-io]
+shairplay = { path = "vendor/shairplay" }
