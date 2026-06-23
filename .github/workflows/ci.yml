@@ -19,3 +19,5 @@ jobs:
         run: nix develop -c cargo test --workspace --all-features
       - name: Docker build
         run: docker build -f packaging/docker/Dockerfile .
+      - name: Home Assistant Docker build
+        run: docker build -f airsonos2/Dockerfile .

@@ -24,6 +24,8 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 use url::Url;
 
+mod home_assistant;
+
 /// How long to keep a bridge session alive after the buffered audio stream
 /// closes while AirPlay playback is paused.
 const PAUSED_SESSION_GRACE_SECS: u64 = 60;
@@ -67,6 +69,13 @@ enum Command {
         #[arg(long, default_value = "/etc/airsonos2/config.toml")]
         config: PathBuf,
     },
+    #[command(hide = true)]
+    RenderHaConfig {
+        #[arg(long, default_value = "/data/options.json")]
+        options: PathBuf,
+        #[arg(long, default_value = "/data/config.toml")]
+        output: PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -105,6 +114,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Calibrate { zones, config } => {
             let config = load_config_or_default(&config)?;
             calibrate(&zones, &config)
+        }
+        Command::RenderHaConfig { options, output } => {
+            home_assistant::render_config_file(&options, &output)?;
+            Ok(())
         }
     }
 }

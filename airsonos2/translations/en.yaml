@@ -1,0 +1,95 @@
+configuration:
+  log_level:
+    name: Log level
+    description: Runtime logging verbosity.
+  run_doctor_on_start:
+    name: Run doctor on start
+    description: Run AirSonos2 diagnostics during startup and continue even if diagnostics warn or fail.
+  name_template:
+    name: AirPlay name template
+    description: Display name pattern for generated AirPlay endpoints. Use {room} for the Sonos room name.
+  advertised_model:
+    name: Advertised model
+    description: AirPlay hardware model identifier announced to Apple clients.
+  pin:
+    name: Pairing PIN
+    description: PIN used during AirPlay 2 pairing.
+  rtsp_password:
+    name: RTSP password
+    description: Optional legacy RTSP digest password. Leave empty for normal AirPlay 2 pairing.
+  base_rtsp_port:
+    name: Base RTSP port
+    description: First port used for generated AirPlay endpoints.
+  output_sample_rate:
+    name: Output sample rate
+    description: PCM sample rate sent from AirPlay receiver processing to the stream encoder.
+  output_channels:
+    name: Output channels
+    description: Number of output audio channels.
+  max_clients_per_zone:
+    name: Max clients per zone
+    description: Maximum concurrent AirPlay RTSP and event connections for each generated endpoint.
+  auto_discover:
+    name: Auto discover Sonos
+    description: Discover Sonos speakers with SSDP.
+  static_ips:
+    name: Static Sonos IPs
+    description: Additional Sonos speaker IP addresses to probe directly.
+  include_rooms:
+    name: Include rooms
+    description: Only expose matching Sonos room names when this list is not empty.
+  exclude_rooms:
+    name: Exclude rooms
+    description: Hide matching Sonos room names.
+  force_standalone_on_start:
+    name: Force standalone on start
+    description: Move a Sonos room out of its current group before AirSonos2 starts playback.
+  stop_on_disconnect:
+    name: Stop on disconnect
+    description: Stop Sonos playback when the matching AirPlay session disconnects.
+  stream_codec:
+    name: Stream codec
+    description: Audio format served for Sonos HTTP pull streams.
+  mp3_bitrate_kbps:
+    name: MP3 bitrate
+    description: Bitrate used when stream codec is MP3.
+  prebuffer_ms:
+    name: Prebuffer
+    description: Audio buffer duration before Sonos playback starts.
+  startup_wait_ms:
+    name: Startup wait
+    description: Optional Sonos startup wait override. Leave empty to use the bridge default.
+  default_offset_ms:
+    name: Default offset
+    description: Default room sync offset in milliseconds.
+  multi_select_window_ms:
+    name: Multi-select window
+    description: Time window for grouping near-simultaneous AirPlay starts into one sync cohort.
+  start_deadline_ms:
+    name: Start deadline
+    description: Maximum time to wait for streams in a sync cohort before starting ready rooms.
+  startup_compensation:
+    name: Startup compensation
+    description: Use recent startup timing samples to delay faster rooms in grouped playback.
+  startup_sample_limit:
+    name: Startup sample limit
+    description: Maximum timing samples retained per room.
+  startup_min_samples:
+    name: Startup minimum samples
+    description: Minimum timing samples required before automatic startup compensation is applied.
+  startup_max_compensation_ms:
+    name: Startup max compensation
+    description: Maximum automatic compensation delay in milliseconds.
+  play_command_spread_warn_ms:
+    name: Play command warning threshold
+    description: Log a warning when grouped Sonos play commands spread beyond this duration.
+  zone_offsets:
+    name: Zone offsets
+    description: Per-room sync offsets in milliseconds.
+    fields:
+      zone:
+        name: Zone
+        description: Sonos room name or zone id.
+      offset_ms:
+        name: Offset
+        description: Sync offset in milliseconds.
