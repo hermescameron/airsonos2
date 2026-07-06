@@ -1477,7 +1477,11 @@ fn sync_cohort_should_start(cohort: &SyncCohort, now: Instant, force: bool) -> b
     let deadline_expired = now >= cohort.start_deadline;
     let all_prepared =
         !cohort.sessions.is_empty() && cohort.sessions.len() == cohort.prepared.len();
-    force || all_prepared || (window_closed && deadline_expired)
+    // Keep the multi-select window open even when every currently known session
+    // is prepared, so late sessions selected within the window still join the
+    // cohort. The start deadline caps how long unprepared sessions can hold up
+    // the rest.
+    force || deadline_expired || (window_closed && all_prepared)
 }
 
 fn downstream_retry_delay(attempt: u32) -> Duration {
@@ -1607,14 +1611,12 @@ mod tests {
         assert_eq!(cohort.sessions, vec![first, second]);
     }
 
-    #[test]
-    fn all_prepared_cohort_starts_immediately() {
-        let now = Instant::now();
+    fn cohort_with_single_prepared_session(now: Instant) -> SyncCohort {
         let session_id = SessionId::new();
         let mut cohort = SyncCohort {
             opened_at: now,
-            window_deadline: now + Duration::from_secs(1),
-            start_deadline: now + Duration::from_secs(3),
+            window_deadline: now + Duration::from_millis(750),
+            start_deadline: now + Duration::from_millis(2_500),
             sessions: vec![session_id],
             prepared: HashMap::new(),
         };
@@ -1622,12 +1624,72 @@ mod tests {
             session_id,
             prepared_downstream(session_id, zone_id(), StreamCodec::Mp3),
         );
-
-        assert!(sync_cohort_should_start(&cohort, now, false));
+        cohort
     }
 
     #[test]
-    fn cohort_deadline_waits_until_window_and_start_deadline_pass() {
+    fn single_prepared_session_waits_for_multi_select_window() {
+        let now = Instant::now();
+        let cohort = cohort_with_single_prepared_session(now);
+
+        assert!(!sync_cohort_should_start(&cohort, now, false));
+        assert!(!sync_cohort_should_start(
+            &cohort,
+            now + Duration::from_millis(700),
+            false
+        ));
+    }
+
+    #[test]
+    fn single_prepared_session_starts_once_window_closes() {
+        let now = Instant::now();
+        let cohort = cohort_with_single_prepared_session(now);
+
+        assert!(sync_cohort_should_start(
+            &cohort,
+            now + Duration::from_millis(750),
+            false
+        ));
+    }
+
+    #[test]
+    fn force_starts_cohort_within_multi_select_window() {
+        let now = Instant::now();
+        let cohort = cohort_with_single_prepared_session(now);
+
+        assert!(sync_cohort_should_start(&cohort, now, true));
+    }
+
+    #[test]
+    fn partially_prepared_cohort_waits_for_start_deadline_after_window() {
+        let now = Instant::now();
+        let prepared_session = SessionId::new();
+        let mut cohort = SyncCohort {
+            opened_at: now,
+            window_deadline: now + Duration::from_millis(750),
+            start_deadline: now + Duration::from_millis(2_500),
+            sessions: vec![prepared_session, SessionId::new()],
+            prepared: HashMap::new(),
+        };
+        cohort.prepared.insert(
+            prepared_session,
+            prepared_downstream(prepared_session, zone_id(), StreamCodec::Mp3),
+        );
+
+        assert!(!sync_cohort_should_start(
+            &cohort,
+            now + Duration::from_millis(800),
+            false
+        ));
+        assert!(sync_cohort_should_start(
+            &cohort,
+            now + Duration::from_millis(2_600),
+            false
+        ));
+    }
+
+    #[test]
+    fn unprepared_cohort_waits_for_start_deadline() {
         let now = Instant::now();
         let cohort = SyncCohort {
             opened_at: now,
