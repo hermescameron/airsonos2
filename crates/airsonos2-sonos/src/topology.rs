@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
@@ -50,7 +52,12 @@ pub fn parse_zone_group_state(xml: &str) -> Vec<ZoneGroupMember> {
 fn attr(element: &quick_xml::events::BytesStart<'_>, key: &[u8]) -> Option<String> {
     element.attributes().flatten().find_map(|attribute| {
         if attribute.key.as_ref() == key {
-            Some(String::from_utf8_lossy(attribute.value.as_ref()).into_owned())
+            // Fall back to the raw value if unescaping fails (e.g. malformed entity).
+            let value = attribute
+                .unescape_value()
+                .map(Cow::into_owned)
+                .unwrap_or_else(|_| String::from_utf8_lossy(attribute.value.as_ref()).into_owned());
+            Some(value)
         } else {
             None
         }
@@ -78,5 +85,27 @@ mod tests {
         assert!(members[0].is_group_coordinator);
         assert!(members[0].is_visible_room);
         assert!(!members[1].is_visible_room);
+    }
+
+    #[test]
+    fn unescapes_attribute_values() {
+        let xml = r#"
+        <ZoneGroups>
+          <ZoneGroup Coordinator="RINCON_A&amp;B" ID="RINCON_A&amp;B:1">
+            <ZoneGroupMember UUID="RINCON_A&amp;B" ZoneName="Kitchen &amp; Den" Location="http://192.0.2.1:1400/xml/device_description.xml?a=1&amp;b=2" Invisible="0" />
+          </ZoneGroup>
+        </ZoneGroups>
+        "#;
+
+        let members = parse_zone_group_state(xml);
+
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].uuid, "RINCON_A&B");
+        assert_eq!(members[0].zone_name, "Kitchen & Den");
+        assert_eq!(
+            members[0].location.as_deref(),
+            Some("http://192.0.2.1:1400/xml/device_description.xml?a=1&b=2")
+        );
+        assert!(members[0].is_group_coordinator);
     }
 }
