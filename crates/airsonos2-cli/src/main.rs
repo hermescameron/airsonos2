@@ -1481,7 +1481,7 @@ fn sync_cohort_should_start(cohort: &SyncCohort, now: Instant, force: bool) -> b
     // is prepared, so late sessions selected within the window still join the
     // cohort. The start deadline caps how long unprepared sessions can hold up
     // the rest.
-    force || deadline_expired || (window_closed && all_prepared)
+    force || (window_closed && (all_prepared || deadline_expired))
 }
 
 fn downstream_retry_delay(attempt: u32) -> Duration {
@@ -1658,6 +1658,19 @@ mod tests {
         let cohort = cohort_with_single_prepared_session(now);
 
         assert!(sync_cohort_should_start(&cohort, now, true));
+    }
+
+    #[test]
+    fn expired_start_deadline_does_not_bypass_multi_select_window() {
+        let now = Instant::now();
+        let mut cohort = cohort_with_single_prepared_session(now);
+        cohort.start_deadline = now + Duration::from_millis(500);
+
+        assert!(!sync_cohort_should_start(
+            &cohort,
+            now + Duration::from_millis(500),
+            false
+        ));
     }
 
     #[test]
