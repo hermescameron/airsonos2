@@ -4,6 +4,8 @@ use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
 
+use crate::sonos_addr;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeviceDescription {
     pub room_name: String,
@@ -61,7 +63,7 @@ pub fn parse_device_description(
     let udn = device
         .udn
         .ok_or(DeviceDescriptionError::MissingField("UDN"))?;
-    let base_url = Url::parse(&format!("http://{}:1400", ip_url_host(ip)))?;
+    let base_url = Url::parse(&format!("http://{}", sonos_addr(ip)))?;
 
     Ok(DeviceDescription {
         room_name,
@@ -69,13 +71,6 @@ pub fn parse_device_description(
         udn,
         base_url,
     })
-}
-
-fn ip_url_host(ip: IpAddr) -> String {
-    match ip {
-        IpAddr::V4(ip) => ip.to_string(),
-        IpAddr::V6(ip) => format!("[{ip}]"),
-    }
 }
 
 #[cfg(test)]
