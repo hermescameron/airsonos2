@@ -57,7 +57,6 @@ pub async fn run_doctor(config: &Config) -> Result<DoctorReport, DoctorError> {
         )
         .await,
     );
-    checks.push(check_metrics_port(&config.diagnostics.metrics_addr).await);
 
     match discover_sonos_zones_from_sources(
         Duration::from_secs(2),
@@ -131,17 +130,6 @@ async fn check_ffmpeg(path: &std::path::Path) -> DoctorCheck {
             name: "ffmpeg encoder".to_owned(),
             status: CheckStatus::Fail,
             detail: error.to_string(),
-        },
-    }
-}
-
-async fn check_metrics_port(metrics_addr: &str) -> DoctorCheck {
-    match metrics_addr.parse::<SocketAddr>() {
-        Ok(addr) => check_tcp_port("diagnostics metrics port", addr.ip(), addr.port()).await,
-        Err(error) => DoctorCheck {
-            name: "diagnostics metrics port".to_owned(),
-            status: CheckStatus::Fail,
-            detail: format!("invalid diagnostics.metrics_addr {metrics_addr:?}: {error}"),
         },
     }
 }
@@ -307,14 +295,6 @@ mod tests {
         assert_eq!(ports.len(), 2);
         assert!(ports[0].1.is_ok());
         assert!(ports[1].1.is_err());
-    }
-
-    #[tokio::test]
-    async fn invalid_metrics_addr_fails_the_metrics_check() {
-        let check = check_metrics_port("not-an-addr").await;
-
-        assert_eq!(check.status, CheckStatus::Fail);
-        assert!(check.detail.contains("not-an-addr"));
     }
 
     #[test]
