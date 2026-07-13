@@ -651,6 +651,7 @@ impl BridgeRuntime {
     }
 
     fn clear_session_runtime_state(&mut self, session_id: SessionId) {
+        self.remove_session_from_sync_cohort(session_id);
         self.playback_state.remove(&session_id);
         self.session_formats.remove(&session_id);
         self.downstream_generations.remove(&session_id);
@@ -853,6 +854,24 @@ impl BridgeRuntime {
             }
             AirPlayEvent::ClientDisconnected { zone_id, addr } => {
                 info!(%zone_id, %addr, "AirPlay client disconnected");
+                let queued: Vec<_> = self
+                    .sessions
+                    .iter()
+                    .filter_map(|(session_id, session_zone_id)| {
+                        (session_zone_id == &zone_id
+                            && self
+                                .sync_cohort
+                                .as_ref()
+                                .is_some_and(|cohort| cohort.sessions.contains(session_id)))
+                        .then_some(*session_id)
+                    })
+                    .collect();
+                for session_id in queued {
+                    self.invalidate_prepared_downstream(session_id);
+                    if let Some(task) = self.playback_tasks.remove(&session_id) {
+                        task.abort();
+                    }
+                }
                 Ok(())
             }
             AirPlayEvent::Error { zone_id, message } => {
@@ -883,9 +902,6 @@ impl BridgeRuntime {
             encoder_state: EncoderState::Starting,
         };
         let live_stream = self.registry.create(stream_session).await;
-        if stream_codec == StreamCodec::Wav {
-            live_stream.arm_playback_anchor_on_next_timed_pcm();
-        }
         let encoder = FfmpegEncoder::spawn(
             FfmpegEncoderConfig {
                 ffmpeg_path: self.config.stream.ffmpeg_path.clone(),
@@ -901,6 +917,7 @@ impl BridgeRuntime {
     }
 
     fn next_downstream_generation(&mut self, session_id: SessionId) -> u64 {
+        self.remove_session_from_sync_cohort(session_id);
         let generation = self.downstream_generations.entry(session_id).or_insert(0);
         *generation = generation.saturating_add(1);
         *generation
@@ -914,16 +931,45 @@ impl BridgeRuntime {
         });
     }
 
-    fn add_session_to_sync_cohort(&mut self, session_id: SessionId) {
+    fn remove_session_from_sync_cohort(&mut self, session_id: SessionId) {
+        let mut removed = false;
+        if let Some(cohort) = self.sync_cohort.as_mut() {
+            let old_len = cohort.sessions.len();
+            cohort.sessions.retain(|id| *id != session_id);
+            removed = cohort.sessions.len() != old_len;
+            cohort.prepared.remove(&session_id);
+        }
+        if self
+            .sync_cohort
+            .as_ref()
+            .is_some_and(|cohort| cohort.sessions.is_empty())
+        {
+            self.sync_cohort = None;
+        } else if removed {
+            let _ = self.cohort_wake_tx.send(());
+        }
+    }
+
+    fn invalidate_prepared_downstream(&mut self, session_id: SessionId) {
+        self.remove_session_from_sync_cohort(session_id);
+        if let Some(generation) = self.downstream_generations.get_mut(&session_id) {
+            *generation = generation.saturating_add(1);
+        }
+    }
+
+    async fn add_session_to_sync_cohort(&mut self, session_id: SessionId) {
         let now = Instant::now();
         let multi_select_window = Duration::from_millis(self.config.sync.multi_select_window_ms);
         let start_deadline = Duration::from_millis(self.config.sync.start_deadline_ms);
         let should_open = self
             .sync_cohort
             .as_ref()
-            .is_none_or(|cohort| now >= cohort.window_deadline || now >= cohort.start_deadline);
+            .is_none_or(|cohort| now >= cohort.window_deadline);
 
         if should_open {
+            // Drain the closed cohort before replacing it; its timer wake may still be queued.
+            self.maybe_start_sync_cohort(true).await;
+            let now = Instant::now();
             self.sync_cohort = Some(SyncCohort {
                 opened_at: now,
                 window_deadline: now + multi_select_window,
@@ -943,7 +989,9 @@ impl BridgeRuntime {
     }
 
     async fn handle_prepared_downstream(&mut self, prepared: PreparedDownstream) {
-        if self.downstream_generations.get(&prepared.session_id) != Some(&prepared.generation) {
+        if self.downstream_generations.get(&prepared.session_id) != Some(&prepared.generation)
+            || self.desired_playback.get(&prepared.session_id) != Some(&true)
+        {
             debug!(
                 session_id = %prepared.session_id,
                 zone_id = %prepared.zone_id,
@@ -1288,7 +1336,7 @@ impl BridgeRuntime {
 
         let force_standalone_on_start =
             self.config.sonos.force_standalone_on_start && !zone.is_group_coordinator;
-        self.add_session_to_sync_cohort(session_id);
+        self.add_session_to_sync_cohort(session_id).await;
         let task = self.start_sonos_prepare_task(SonosStreamPrepare {
             session_id,
             zone_id: zone_id.clone(),
@@ -1346,7 +1394,7 @@ impl BridgeRuntime {
             "recreated downstream stream for AirPlay playback"
         );
 
-        self.add_session_to_sync_cohort(session_id);
+        self.add_session_to_sync_cohort(session_id).await;
         let task = self.start_sonos_prepare_task(SonosStreamPrepare {
             session_id,
             zone_id: zone_id.clone(),
@@ -1389,6 +1437,7 @@ impl BridgeRuntime {
 
         self.downstream_reset_needed.insert(session_id);
         self.cancel_downstream_retry(session_id);
+        self.invalidate_prepared_downstream(session_id);
         if let Some(task) = self.playback_tasks.remove(&session_id) {
             task.abort();
         }
@@ -1577,6 +1626,16 @@ mod tests {
         let session_id = SessionId::new();
         let zone_id = zone_id();
         runtime.sessions.insert(session_id, zone_id.clone());
+        runtime.add_session_to_sync_cohort(session_id).await;
+        runtime
+            .sync_cohort
+            .as_mut()
+            .expect("cohort")
+            .prepared
+            .insert(
+                session_id,
+                prepared_downstream(session_id, zone_id.clone(), StreamCodec::Mp3),
+            );
 
         runtime
             .set_playback_state(session_id, zone_id, false)
@@ -1585,6 +1644,38 @@ mod tests {
 
         assert_eq!(runtime.desired_playback.get(&session_id), Some(&false));
         assert!(runtime.downstream_reset_needed.contains(&session_id));
+        assert!(runtime.sync_cohort.is_none());
+    }
+
+    #[tokio::test]
+    async fn disconnect_invalidates_queued_prepared_session() {
+        let mut runtime = runtime();
+        let session_id = SessionId::new();
+        let zone_id = zone_id();
+        runtime.sessions.insert(session_id, zone_id.clone());
+        runtime.downstream_generations.insert(session_id, 1);
+        runtime.desired_playback.insert(session_id, true);
+        runtime.add_session_to_sync_cohort(session_id).await;
+        runtime
+            .sync_cohort
+            .as_mut()
+            .expect("cohort")
+            .prepared
+            .insert(
+                session_id,
+                prepared_downstream(session_id, zone_id.clone(), StreamCodec::Mp3),
+            );
+
+        runtime
+            .handle_event(AirPlayEvent::ClientDisconnected {
+                zone_id,
+                addr: "127.0.0.1:1234".to_owned(),
+            })
+            .await
+            .expect("disconnect");
+
+        assert!(runtime.sync_cohort.is_none());
+        assert_eq!(runtime.downstream_generations.get(&session_id), Some(&2));
     }
 
     #[test]
@@ -1604,11 +1695,30 @@ mod tests {
         let first = SessionId::new();
         let second = SessionId::new();
 
-        runtime.add_session_to_sync_cohort(first);
-        runtime.add_session_to_sync_cohort(second);
+        runtime.add_session_to_sync_cohort(first).await;
+        runtime.add_session_to_sync_cohort(second).await;
 
         let cohort = runtime.sync_cohort.expect("cohort");
         assert_eq!(cohort.sessions, vec![first, second]);
+    }
+
+    #[tokio::test]
+    async fn closed_cohort_is_drained_before_new_session_opens_another() {
+        let mut runtime = runtime();
+        let now = Instant::now();
+        let old = cohort_with_single_prepared_session(now);
+        let old_session = old.sessions[0];
+        let new_session = SessionId::new();
+        runtime.sync_cohort = Some(SyncCohort {
+            window_deadline: now,
+            ..old
+        });
+
+        runtime.add_session_to_sync_cohort(new_session).await;
+
+        let cohort = runtime.sync_cohort.expect("new cohort");
+        assert_eq!(cohort.sessions, vec![new_session]);
+        assert!(!cohort.prepared.contains_key(&old_session));
     }
 
     fn cohort_with_single_prepared_session(now: Instant) -> SyncCohort {
@@ -1821,7 +1931,7 @@ mod tests {
         let session_id = SessionId::new();
         let zone_id = zone_id();
         runtime.downstream_generations.insert(session_id, 2);
-        runtime.add_session_to_sync_cohort(session_id);
+        runtime.add_session_to_sync_cohort(session_id).await;
 
         let mut prepared = prepared_downstream(session_id, zone_id, StreamCodec::Mp3);
         prepared.generation = 1;
