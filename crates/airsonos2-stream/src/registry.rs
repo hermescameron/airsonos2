@@ -119,6 +119,7 @@ pub struct LiveStream {
     bytes_skipped: Arc<AtomicU64>,
     chunks_dropped: Arc<AtomicU64>,
     subscriber_connected: Arc<AtomicBool>,
+    delivery_open: Arc<AtomicBool>,
     ready: watch::Sender<bool>,
     subscriber: watch::Sender<bool>,
     playback_anchor: Arc<std::sync::Mutex<PlaybackAnchorState>>,
@@ -142,6 +143,7 @@ impl LiveStream {
             bytes_skipped: Arc::new(AtomicU64::new(0)),
             chunks_dropped: Arc::new(AtomicU64::new(0)),
             subscriber_connected: Arc::new(AtomicBool::new(false)),
+            delivery_open: Arc::new(AtomicBool::new(true)),
             ready,
             subscriber,
             playback_anchor: Arc::new(std::sync::Mutex::new(PlaybackAnchorState::Unset)),
@@ -163,7 +165,9 @@ impl LiveStream {
         self.note_first_encoded(len);
         let _ = self.ready.send(true);
 
-        if !self.subscriber_connected.load(Ordering::Acquire) {
+        if !self.subscriber_connected.load(Ordering::Acquire)
+            || !self.delivery_open.load(Ordering::Acquire)
+        {
             self.bytes_dropped.fetch_add(len, Ordering::Relaxed);
             self.chunks_dropped.fetch_add(1, Ordering::Relaxed);
             return;
@@ -190,7 +194,9 @@ impl LiveStream {
         self.note_first_encoded(len);
         let _ = self.ready.send(true);
 
-        if !self.subscriber_connected.load(Ordering::Acquire) {
+        if !self.subscriber_connected.load(Ordering::Acquire)
+            || !self.delivery_open.load(Ordering::Acquire)
+        {
             self.bytes_dropped.fetch_add(len, Ordering::Relaxed);
             self.chunks_dropped.fetch_add(1, Ordering::Relaxed);
             return;
@@ -351,6 +357,15 @@ impl LiveStream {
             None
         };
         (prelude, subscriber)
+    }
+
+    /// Drop live audio until coordinated downstream playback is ready.
+    pub fn hold_delivery(&self) {
+        self.delivery_open.store(false, Ordering::Release);
+    }
+
+    pub fn open_delivery(&self) {
+        self.delivery_open.store(true, Ordering::Release);
     }
 
     pub fn set_playback_anchor(&self, anchor: Instant) {
@@ -534,6 +549,25 @@ mod tests {
         let chunk = rx.try_recv().expect("live chunk");
         assert_eq!(&chunk[..], b"live");
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn staggered_subscribers_wait_for_the_same_delivery_gate() {
+        let stream = LiveStream::new(session());
+        stream.hold_delivery();
+        stream.on_subscriber_connected();
+        let mut first = stream.subscribe();
+        stream.publish(Bytes::from_static(b"before"));
+        let mut second = stream.subscribe();
+        stream.publish(Bytes::from_static(b"still-before"));
+
+        assert!(first.try_recv().is_err());
+        assert!(second.try_recv().is_err());
+        stream.open_delivery();
+        stream.publish(Bytes::from_static(b"together"));
+
+        assert_eq!(&first.try_recv().expect("first")[..], b"together");
+        assert_eq!(&second.try_recv().expect("second")[..], b"together");
     }
 
     #[tokio::test]
