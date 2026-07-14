@@ -156,6 +156,10 @@ impl LiveStream {
     /// Publish encoded stream bytes. Before an HTTP subscriber connects, chunks are
     /// dropped so Sonos starts at the live edge instead of replaying startup audio.
     pub fn publish(&self, bytes: Bytes) {
+        self.publish_inner(bytes, false);
+    }
+
+    fn publish_inner(&self, bytes: Bytes, bypass_delivery_hold: bool) {
         if bytes.is_empty() {
             return;
         }
@@ -166,7 +170,7 @@ impl LiveStream {
         let _ = self.ready.send(true);
 
         if !self.subscriber_connected.load(Ordering::Acquire)
-            || !self.delivery_open.load(Ordering::Acquire)
+            || (!bypass_delivery_hold && !self.delivery_open.load(Ordering::Acquire))
         {
             self.bytes_dropped.fetch_add(len, Ordering::Relaxed);
             self.chunks_dropped.fetch_add(1, Ordering::Relaxed);
@@ -313,7 +317,7 @@ impl LiveStream {
             *prelude = Some(bytes.clone());
         }
 
-        self.publish(bytes);
+        self.publish_inner(bytes, true);
     }
 
     /// Called when Sonos (or another client) connects to the HTTP stream.
@@ -602,6 +606,21 @@ mod tests {
 
         let chunk = rx.try_recv().expect("late prelude chunk");
         assert_eq!(&chunk[..], b"header");
+    }
+
+    #[tokio::test]
+    async fn held_delivery_still_sends_late_prelude_to_attached_subscriber() {
+        let stream = LiveStream::new(session());
+        stream.hold_delivery();
+        let (prelude, mut rx) = stream.attach_subscriber();
+
+        assert!(prelude.is_none());
+        stream.publish_prelude(Bytes::from_static(b"header"));
+        stream.publish(Bytes::from_static(b"held"));
+
+        let chunk = rx.try_recv().expect("late prelude chunk");
+        assert_eq!(&chunk[..], b"header");
+        assert!(rx.try_recv().is_err());
     }
 
     #[tokio::test]
