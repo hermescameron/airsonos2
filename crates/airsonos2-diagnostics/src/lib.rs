@@ -297,6 +297,14 @@ mod tests {
         assert!(ports[1].1.is_err());
     }
 
+    #[tokio::test]
+    async fn rtsp_ports_warn_when_all_zones_are_filtered_out() {
+        let checks = check_rtsp_ports(&[zone("Hidden", false)], &Config::default()).await;
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].status, CheckStatus::Warn);
+    }
+
     #[test]
     fn doctor_report_treats_warnings_as_nonfatal() {
         let report = DoctorReport {
