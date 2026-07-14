@@ -3,7 +3,6 @@ use std::fs;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use airsonos2_airplay::{
@@ -21,8 +20,9 @@ use airsonos2_stream::{
 };
 use clap::{Parser, Subcommand};
 use tokio::net::UdpSocket;
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use url::Url;
 
@@ -516,44 +516,7 @@ enum DownstreamStartOutcome {
     Cancelled,
 }
 
-#[derive(Clone, Debug)]
-struct DownstreamLifecycle {
-    cancelled: Arc<AtomicBool>,
-    notify: Arc<Notify>,
-}
-
-impl DownstreamLifecycle {
-    fn new() -> Self {
-        Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
-            notify: Arc::new(Notify::new()),
-        }
-    }
-
-    fn cancel(&self) {
-        if !self.cancelled.swap(true, Ordering::AcqRel) {
-            self.notify.notify_waiters();
-        }
-    }
-
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-    }
-
-    fn same_as(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.cancelled, &other.cancelled)
-    }
-
-    async fn cancelled(&self) {
-        let notified = self.notify.notified();
-        tokio::pin!(notified);
-        notified.as_mut().enable();
-        if self.is_cancelled() {
-            return;
-        }
-        notified.await;
-    }
-}
+type DownstreamLifecycle = Arc<CancellationToken>;
 
 #[derive(Clone, Debug)]
 struct DownstreamStartResult {
@@ -961,7 +924,7 @@ impl BridgeRuntime {
         self.remove_session_from_sync_cohort(session_id);
         let generation = self.downstream_generations.entry(session_id).or_insert(0);
         *generation = generation.saturating_add(1);
-        let lifecycle = DownstreamLifecycle::new();
+        let lifecycle = Arc::new(CancellationToken::new());
         self.downstream_lifecycles
             .insert(session_id, lifecycle.clone());
         (*generation, lifecycle)
@@ -1010,7 +973,7 @@ impl BridgeRuntime {
             && self
                 .downstream_lifecycles
                 .get(&prepared.session_id)
-                .is_some_and(|lifecycle| lifecycle.same_as(&prepared.lifecycle))
+                .is_some_and(|lifecycle| Arc::ptr_eq(lifecycle, &prepared.lifecycle))
             && !prepared.lifecycle.is_cancelled()
     }
 
@@ -1720,7 +1683,7 @@ mod tests {
             zone_id: zone_id.clone(),
             generation: 1,
             cohort_id: 0,
-            lifecycle: DownstreamLifecycle::new(),
+            lifecycle: Arc::new(CancellationToken::new()),
             zone_room_name: "Kitchen".to_owned(),
             client: SonosClient::from_base_url(
                 Url::parse("http://127.0.0.1:1400").expect("sonos url"),
@@ -1856,7 +1819,7 @@ mod tests {
         let mut runtime = runtime();
         let first = SessionId::new();
         let first_zone = zone_id();
-        let first_lifecycle = DownstreamLifecycle::new();
+        let first_lifecycle = Arc::new(CancellationToken::new());
         runtime.downstream_generations.insert(first, 1);
         runtime.desired_playback.insert(first, true);
         runtime
@@ -1892,7 +1855,7 @@ mod tests {
         runtime.downstream_generations.insert(unprepared_id, 4);
         runtime
             .downstream_lifecycles
-            .insert(unprepared_id, DownstreamLifecycle::new());
+            .insert(unprepared_id, Arc::new(CancellationToken::new()));
         runtime.sync_cohorts.push_back(SyncCohort {
             id: 1,
             opened_at: Instant::now() - Duration::from_secs(3),
@@ -1935,7 +1898,7 @@ mod tests {
         runtime.sessions.insert(session_id, zone_id.clone());
         runtime.desired_playback.insert(session_id, true);
         runtime.downstream_generations.insert(session_id, 1);
-        let lifecycle = DownstreamLifecycle::new();
+        let lifecycle = Arc::new(CancellationToken::new());
         runtime
             .downstream_lifecycles
             .insert(session_id, lifecycle.clone());
@@ -2026,7 +1989,7 @@ mod tests {
             zone_id,
             generation: 1,
             cohort_id: 1,
-            lifecycle: DownstreamLifecycle::new(),
+            lifecycle: Arc::new(CancellationToken::new()),
             zone_room_name: "Kitchen".to_owned(),
             client: SonosClient::from_base_url(
                 Url::parse(&format!("http://{addr}")).expect("sonos url"),
